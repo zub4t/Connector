@@ -38,6 +38,7 @@ import org.eclipse.edc.connector.service.contractnegotiation.ContractNegotiation
 import org.eclipse.edc.connector.service.policydefinition.PolicyDefinitionEventListener;
 import org.eclipse.edc.connector.service.policydefinition.PolicyDefinitionServiceImpl;
 import org.eclipse.edc.connector.service.protocol.ProtocolTokenValidatorImpl;
+import org.eclipse.edc.connector.service.protocol.VersionProtocolServiceImpl;
 import org.eclipse.edc.connector.service.transferprocess.TransferProcessProtocolServiceImpl;
 import org.eclipse.edc.connector.service.transferprocess.TransferProcessServiceImpl;
 import org.eclipse.edc.connector.spi.asset.AssetService;
@@ -49,9 +50,12 @@ import org.eclipse.edc.connector.spi.contractnegotiation.ContractNegotiationProt
 import org.eclipse.edc.connector.spi.contractnegotiation.ContractNegotiationService;
 import org.eclipse.edc.connector.spi.policydefinition.PolicyDefinitionService;
 import org.eclipse.edc.connector.spi.protocol.ProtocolTokenValidator;
+import org.eclipse.edc.connector.spi.protocol.ProtocolVersionRegistry;
+import org.eclipse.edc.connector.spi.protocol.VersionProtocolService;
 import org.eclipse.edc.connector.spi.transferprocess.TransferProcessProtocolService;
 import org.eclipse.edc.connector.spi.transferprocess.TransferProcessService;
 import org.eclipse.edc.connector.transfer.spi.TransferProcessManager;
+import org.eclipse.edc.connector.transfer.spi.flow.DataFlowManager;
 import org.eclipse.edc.connector.transfer.spi.observe.TransferProcessObservable;
 import org.eclipse.edc.connector.transfer.spi.store.TransferProcessStore;
 import org.eclipse.edc.policy.engine.spi.PolicyEngine;
@@ -153,6 +157,12 @@ public class ControlPlaneServicesExtension implements ServiceExtension {
     @Inject(required = false)
     private ProtocolTokenValidator protocolTokenValidator;
 
+    @Inject
+    private ProtocolVersionRegistry protocolVersionRegistry;
+
+    @Inject
+    private DataFlowManager dataFlowManager;
+
     @Override
     public String name() {
         return NAME;
@@ -216,7 +226,8 @@ public class ControlPlaneServicesExtension implements ServiceExtension {
     @Provider
     public TransferProcessProtocolService transferProcessProtocolService() {
         return new TransferProcessProtocolServiceImpl(transferProcessStore, transactionContext, contractNegotiationStore,
-                contractValidationService, protocolTokenValidator(), dataAddressValidator, transferProcessObservable, clock, monitor, telemetry);
+                contractValidationService, protocolTokenValidator(), dataAddressValidator, transferProcessObservable, clock,
+                monitor, telemetry, dataFlowManager);
     }
 
     @Provider
@@ -226,4 +237,10 @@ public class ControlPlaneServicesExtension implements ServiceExtension {
         }
         return protocolTokenValidator;
     }
+
+    @Provider
+    public VersionProtocolService versionProtocolService() {
+        return new VersionProtocolServiceImpl(protocolVersionRegistry, protocolTokenValidator());
+    }
+
 }

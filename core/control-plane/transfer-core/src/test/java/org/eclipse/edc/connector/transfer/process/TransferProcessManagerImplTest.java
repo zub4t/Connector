@@ -43,6 +43,7 @@ import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferCompletionM
 import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferProcessAck;
 import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferRequestMessage;
 import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferStartMessage;
+import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferSuspensionMessage;
 import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferTerminationMessage;
 import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.EdcException;
@@ -58,6 +59,7 @@ import org.eclipse.edc.spi.types.domain.DataAddress;
 import org.eclipse.edc.spi.types.domain.callback.CallbackAddress;
 import org.eclipse.edc.statemachine.retry.EntityRetryProcessConfiguration;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -91,6 +93,8 @@ import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.REQUESTING;
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.STARTED;
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.STARTING;
+import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.SUSPENDED;
+import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.SUSPENDING;
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.TERMINATED;
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.TERMINATING;
 import static org.eclipse.edc.spi.persistence.StateEntityStore.hasState;
@@ -146,7 +150,7 @@ class TransferProcessManagerImplTest {
     @BeforeEach
     void setup() {
         when(protocolWebhook.url()).thenReturn(protocolWebhookUrl);
-        when(dataFlowManager.initiate(any(), any())).thenReturn(StatusResult.success(createDataFlowResponse()));
+        when(dataFlowManager.start(any(), any())).thenReturn(StatusResult.success(createDataFlowResponse()));
         when(policyArchive.findPolicyForContract(any())).thenReturn(Policy.Builder.newInstance().build());
         var observable = new TransferProcessObservableImpl();
         observable.registerListener(listener);
@@ -203,7 +207,7 @@ class TransferProcessManagerImplTest {
                 .thenReturn(List.of(transferProcess))
                 .thenReturn(emptyList());
         var resourceManifest = ResourceManifest.Builder.newInstance().definitions(List.of(new TestResourceDefinition())).build();
-        when(manifestGenerator.generateConsumerResourceManifest(any(DataRequest.class), any(Policy.class)))
+        when(manifestGenerator.generateConsumerResourceManifest(any(TransferProcess.class), any(Policy.class)))
                 .thenReturn(Result.success(resourceManifest));
 
         manager.start();
@@ -222,7 +226,7 @@ class TransferProcessManagerImplTest {
         when(transferProcessStore.nextNotLeased(anyInt(), stateIs(INITIAL.code())))
                 .thenReturn(List.of(transferProcess))
                 .thenReturn(emptyList());
-        when(manifestGenerator.generateConsumerResourceManifest(any(DataRequest.class), any(Policy.class)))
+        when(manifestGenerator.generateConsumerResourceManifest(any(TransferProcess.class), any(Policy.class)))
                 .thenReturn(Result.failure("error"));
 
         manager.start();
@@ -259,7 +263,7 @@ class TransferProcessManagerImplTest {
         var contentDataAddress = DataAddress.Builder.newInstance().type("type").build();
         when(addressResolver.resolveForAsset(any())).thenReturn(contentDataAddress);
         var resourceManifest = ResourceManifest.Builder.newInstance().definitions(List.of(new TestResourceDefinition())).build();
-        when(manifestGenerator.generateProviderResourceManifest(any(DataRequest.class), any(), any()))
+        when(manifestGenerator.generateProviderResourceManifest(any(TransferProcess.class), any(), any()))
                 .thenReturn(resourceManifest);
 
         manager.start();
@@ -290,7 +294,7 @@ class TransferProcessManagerImplTest {
         when(transferProcessStore.nextNotLeased(anyInt(), stateIs(INITIAL.code()))).thenReturn(List.of(transferProcess)).thenReturn(emptyList());
         when(addressResolver.resolveForAsset(any())).thenReturn(DataAddress.Builder.newInstance().type("type").build());
         var resourceManifest = ResourceManifest.Builder.newInstance().definitions(List.of(new TestResourceDefinition())).build();
-        when(manifestGenerator.generateProviderResourceManifest(any(DataRequest.class), any(), any()))
+        when(manifestGenerator.generateProviderResourceManifest(any(TransferProcess.class), any(), any()))
                 .thenReturn(resourceManifest);
 
         manager.start();
@@ -497,7 +501,7 @@ class TransferProcessManagerImplTest {
         when(policyArchive.findPolicyForContract(anyString())).thenReturn(Policy.Builder.newInstance().build());
         when(transferProcessStore.nextNotLeased(anyInt(), providerStateIs(STARTING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
         when(transferProcessStore.findById(process.getId())).thenReturn(process);
-        when(dataFlowManager.initiate(any(), any())).thenReturn(StatusResult.success(dataFlowResponse));
+        when(dataFlowManager.start(any(), any())).thenReturn(StatusResult.success(dataFlowResponse));
         when(dispatcherRegistry.dispatch(any(), isA(TransferStartMessage.class))).thenReturn(completedFuture(StatusResult.success("any")));
 
         manager.start();
@@ -519,7 +523,7 @@ class TransferProcessManagerImplTest {
     @Test
     void starting_onFailureAndRetriesNotExhausted_updatesStateCountForRetry() {
         var process = createTransferProcess(STARTING).toBuilder().type(PROVIDER).build();
-        when(dataFlowManager.initiate(any(), any())).thenReturn(StatusResult.failure(ERROR_RETRY));
+        when(dataFlowManager.start(any(), any())).thenReturn(StatusResult.failure(ERROR_RETRY));
         when(transferProcessStore.nextNotLeased(anyInt(), providerStateIs(STARTING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
         when(transferProcessStore.findById(process.getId())).thenReturn(process, process.toBuilder().state(STARTING.code()).build());
 
@@ -535,7 +539,7 @@ class TransferProcessManagerImplTest {
         var process = createTransferProcess(STARTING).toBuilder().type(PROVIDER).build();
         when(policyArchive.findPolicyForContract(anyString())).thenReturn(Policy.Builder.newInstance().build());
         when(transferProcessStore.nextNotLeased(anyInt(), providerStateIs(STARTING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
-        when(dataFlowManager.initiate(any(), any())).thenReturn(StatusResult.failure(FATAL_ERROR));
+        when(dataFlowManager.start(any(), any())).thenReturn(StatusResult.failure(FATAL_ERROR));
 
         manager.start();
 
@@ -547,7 +551,7 @@ class TransferProcessManagerImplTest {
     @Test
     void starting_onFailureAndRetriesExhausted_transitToTerminating() {
         var process = createTransferProcessBuilder(STARTING).type(PROVIDER).stateCount(RETRY_EXHAUSTED).build();
-        when(dataFlowManager.initiate(any(), any())).thenReturn(StatusResult.failure(ERROR_RETRY));
+        when(dataFlowManager.start(any(), any())).thenReturn(StatusResult.failure(ERROR_RETRY));
         when(transferProcessStore.nextNotLeased(anyInt(), providerStateIs(STARTING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
         when(transferProcessStore.findById(process.getId())).thenReturn(process);
 
@@ -707,6 +711,58 @@ class TransferProcessManagerImplTest {
         });
     }
 
+    @Nested
+    class Suspending {
+
+        @Test
+        void provider_shouldSuspendDataFlowAndTransitionToSuspended_whenMessageSentCorrectly() {
+            var process = createTransferProcessBuilder(SUSPENDING).type(PROVIDER)
+                    .dataRequest(createDataRequestBuilder().id("counterPartyId").build()).build();
+            when(transferProcessStore.nextNotLeased(anyInt(), stateIs(SUSPENDING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
+            when(transferProcessStore.findById(process.getId())).thenReturn(process, process.toBuilder().state(SUSPENDING.code()).build());
+            when(dispatcherRegistry.dispatch(any(), any())).thenReturn(completedFuture(StatusResult.success("any")));
+            when(dataFlowManager.suspend(any())).thenReturn(StatusResult.success());
+
+            manager.start();
+
+            await().untilAsserted(() -> {
+                verify(dataFlowManager).suspend(process);
+                var captor = ArgumentCaptor.forClass(TransferSuspensionMessage.class);
+                verify(dispatcherRegistry).dispatch(eq(Object.class), captor.capture());
+                var message = captor.getValue();
+                assertThat(message.getProviderPid()).isEqualTo(process.getId());
+                assertThat(message.getConsumerPid()).isEqualTo("counterPartyId");
+                assertThat(message.getProcessId()).isEqualTo("counterPartyId");
+                verify(transferProcessStore, atLeastOnce()).save(argThat(p -> p.getState() == SUSPENDED.code()));
+                verify(listener).suspended(process);
+            });
+        }
+
+        @Test
+        void consumer_shouldTransitionToSuspended_whenMessageSentCorrectly() {
+            var process = createTransferProcessBuilder(SUSPENDING).type(CONSUMER)
+                    .dataRequest(createDataRequestBuilder().id("counterPartyId").build()).build();
+            when(transferProcessStore.nextNotLeased(anyInt(), stateIs(SUSPENDING.code()))).thenReturn(List.of(process)).thenReturn(emptyList());
+            when(transferProcessStore.findById(process.getId())).thenReturn(process, process.toBuilder().state(SUSPENDING.code()).build());
+            when(dispatcherRegistry.dispatch(any(), any())).thenReturn(completedFuture(StatusResult.success("any")));
+
+            manager.start();
+
+            await().untilAsserted(() -> {
+                verifyNoInteractions(dataFlowManager);
+                var captor = ArgumentCaptor.forClass(TransferSuspensionMessage.class);
+                verify(dispatcherRegistry).dispatch(eq(Object.class), captor.capture());
+                var message = captor.getValue();
+                assertThat(message.getProviderPid()).isEqualTo("counterPartyId");
+                assertThat(message.getConsumerPid()).isEqualTo(process.getId());
+                assertThat(message.getProcessId()).isEqualTo("counterPartyId");
+                verify(transferProcessStore).save(argThat(p -> p.getState() == SUSPENDED.code()));
+                verify(listener).suspended(process);
+            });
+        }
+
+    }
+
     @Test
     void deprovisioning_shouldTransitionToDeprovisioned() {
         var manifest = ResourceManifest.Builder.newInstance()
@@ -793,6 +849,7 @@ class TransferProcessManagerImplTest {
                 .thenReturn(List.of(transferProcess)).thenReturn(emptyList());
         when(dispatcherRegistry.dispatch(any(), any())).thenReturn(result);
         when(transferProcessStore.findById(transferProcess.getId())).thenReturn(transferProcess);
+        when(dataFlowManager.suspend(any())).thenReturn(StatusResult.success());
         when(dataFlowManager.terminate(any())).thenReturn(StatusResult.success());
 
         manager.start();
@@ -871,16 +928,19 @@ class TransferProcessManagerImplTest {
                     new DispatchFailure(REQUESTING, REQUESTING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(STARTING, STARTING, failedFuture(new EdcException("error")), b -> b.type(PROVIDER).stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(COMPLETING, COMPLETING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
+                    new DispatchFailure(SUSPENDING, SUSPENDING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(TERMINATING, TERMINATING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
                     // retries exhausted
                     new DispatchFailure(REQUESTING, TERMINATED, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_EXHAUSTED)),
                     new DispatchFailure(STARTING, TERMINATING, failedFuture(new EdcException("error")), b -> b.type(PROVIDER).stateCount(RETRIES_EXHAUSTED)),
                     new DispatchFailure(COMPLETING, TERMINATING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_EXHAUSTED)),
+                    new DispatchFailure(SUSPENDING, TERMINATING, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_EXHAUSTED)),
                     new DispatchFailure(TERMINATING, TERMINATED, failedFuture(new EdcException("error")), b -> b.stateCount(RETRIES_EXHAUSTED)),
                     // fatal error, in this case retry should never be done
                     new DispatchFailure(REQUESTING, TERMINATED, completedFuture(StatusResult.failure(FATAL_ERROR)), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(STARTING, TERMINATED, completedFuture(StatusResult.failure(FATAL_ERROR)), b -> b.type(PROVIDER).stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(COMPLETING, TERMINATED, completedFuture(StatusResult.failure(FATAL_ERROR)), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
+                    new DispatchFailure(SUSPENDING, TERMINATED, completedFuture(StatusResult.failure(FATAL_ERROR)), b -> b.stateCount(RETRIES_NOT_EXHAUSTED)),
                     new DispatchFailure(TERMINATING, TERMINATED, completedFuture(StatusResult.failure(FATAL_ERROR)), b -> b.stateCount(RETRIES_NOT_EXHAUSTED))
             );
         }

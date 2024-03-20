@@ -186,7 +186,6 @@ class ContractNegotiationIntegrationTest {
 
         // Create an initial request and trigger consumer manager
         var request = ContractRequest.Builder.newInstance()
-                .providerId(PROVIDER_ID)
                 .counterPartyAddress("callbackAddress")
                 .contractOffer(offer)
                 .protocol("protocol")
@@ -237,7 +236,6 @@ class ContractNegotiationIntegrationTest {
 
         // Create an initial request and trigger consumer manager
         var request = ContractRequest.Builder.newInstance()
-                .providerId("connectorId")
                 .counterPartyAddress("callbackAddress")
                 .contractOffer(offer)
                 .protocol("protocol")
@@ -270,7 +268,6 @@ class ContractNegotiationIntegrationTest {
 
         // Create an initial request and trigger consumer manager
         var request = ContractRequest.Builder.newInstance()
-                .providerId("connectorId")
                 .counterPartyAddress("callbackAddress")
                 .contractOffer(offer)
                 .protocol("protocol")
@@ -381,7 +378,7 @@ class ContractNegotiationIntegrationTest {
                         .assigner("assigner")
                         .assignee("assignee")
                         .duty(Duty.Builder.newInstance()
-                                .action(Action.Builder.newInstance().type("USE").build())
+                                .action(Action.Builder.newInstance().type("use").build())
                                 .build())
                         .build())
                 .build();

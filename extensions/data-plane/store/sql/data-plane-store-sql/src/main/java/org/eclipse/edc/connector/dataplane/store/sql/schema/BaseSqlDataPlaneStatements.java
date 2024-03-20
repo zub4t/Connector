@@ -41,10 +41,10 @@ public class BaseSqlDataPlaneStatements implements DataPlaneStatements {
                 .jsonColumn(getTraceContextColumn())
                 .column(getErrorDetailColumn())
                 .column(getCallbackAddressColumn())
-                .column(getTrackableColumn())
                 .jsonColumn(getSourceColumn())
                 .jsonColumn(getDestinationColumn())
                 .jsonColumn(getPropertiesColumn())
+                .column(getFlowTypeColumn())
                 .insertInto(getDataPlaneTable());
     }
 
@@ -58,10 +58,10 @@ public class BaseSqlDataPlaneStatements implements DataPlaneStatements {
                 .jsonColumn(getTraceContextColumn())
                 .column(getErrorDetailColumn())
                 .column(getCallbackAddressColumn())
-                .column(getTrackableColumn())
                 .jsonColumn(getSourceColumn())
                 .jsonColumn(getDestinationColumn())
                 .jsonColumn(getPropertiesColumn())
+                .column(getFlowTypeColumn())
                 .update(getDataPlaneTable(), getIdColumn());
     }
 

@@ -15,14 +15,17 @@
 package org.eclipse.edc.iam.identitytrust.core.defaults;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 import okhttp3.MediaType;
 import okhttp3.Protocol;
+import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.Buffer;
 import org.eclipse.edc.identitytrust.model.CredentialFormat;
 import org.eclipse.edc.identitytrust.model.CredentialSubject;
 import org.eclipse.edc.identitytrust.model.Issuer;
@@ -43,8 +46,10 @@ import org.mockito.invocation.InvocationOnMock;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.eclipse.edc.jsonld.util.JacksonJsonLd.createObjectMapper;
@@ -60,12 +65,11 @@ import static org.mockito.Mockito.when;
 
 class DefaultCredentialServiceClientTest {
 
+    public static final String PRESENTATION_QUERY = "/presentations/query";
     private static final String CS_URL = "http://test.com/cs";
     private final EdcHttpClient httpClientMock = mock();
     private DefaultCredentialServiceClient client;
-
     private TypeTransformerRegistry transformerRegistry;
-
     private ObjectMapper mapper = JacksonJsonLd.createObjectMapper().enable(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY);
 
     @BeforeEach
@@ -82,6 +86,20 @@ class DefaultCredentialServiceClientTest {
     }
 
     @Test
+    @DisplayName("CS send scopes")
+    void requestPresentation_sendScopes() throws IOException {
+        
+        when(httpClientMock.execute(any()))
+                .thenReturn(response(200, getResourceFileContentAsString("single_ldp-vp.json")));
+
+        var scopes = List.of("customScope");
+        var result = client.requestPresentation(CS_URL, "foo", scopes);
+        assertThat(result.succeeded()).isTrue();
+        assertThat(result.getContent()).hasSize(1).allMatch(vpc -> vpc.format() == CredentialFormat.JSON_LD);
+        verify(httpClientMock).execute(argThat((r) -> containsScope(r, scopes)));
+    }
+
+    @Test
     @DisplayName("CS returns a single LDP-VP")
     void requestPresentation_singleLdpVp() throws IOException {
 
@@ -91,7 +109,7 @@ class DefaultCredentialServiceClientTest {
         var result = client.requestPresentation(CS_URL, "foo", List.of());
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).hasSize(1).allMatch(vpc -> vpc.format() == CredentialFormat.JSON_LD);
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @Test
@@ -103,7 +121,7 @@ class DefaultCredentialServiceClientTest {
         var result = client.requestPresentation(CS_URL, "foo", List.of());
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).hasSize(1).allMatch(vpc -> vpc.format() == CredentialFormat.JWT);
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @Test
@@ -117,7 +135,7 @@ class DefaultCredentialServiceClientTest {
         assertThat(result.getContent()).hasSize(2)
                 .anySatisfy(vp -> assertThat(vp.format()).isEqualTo(CredentialFormat.JSON_LD))
                 .anySatisfy(vp -> assertThat(vp.format()).isEqualTo(CredentialFormat.JWT));
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @Test
@@ -130,7 +148,7 @@ class DefaultCredentialServiceClientTest {
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).hasSize(2)
                 .allSatisfy(vp -> assertThat(vp.format()).isEqualTo(CredentialFormat.JSON_LD));
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @Test
@@ -143,7 +161,7 @@ class DefaultCredentialServiceClientTest {
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).hasSize(2)
                 .allSatisfy(vp -> assertThat(vp.format()).isEqualTo(CredentialFormat.JWT));
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @ParameterizedTest(name = "CS returns HTTP error code {0}")
@@ -155,7 +173,7 @@ class DefaultCredentialServiceClientTest {
         var res = client.requestPresentation(CS_URL, "foo", List.of());
         assertThat(res.failed()).isTrue();
         assertThat(res.getFailureDetail()).isEqualTo("Presentation Query failed: HTTP %s, message: Test failure".formatted(httpCode));
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
     }
 
     @DisplayName("CS returns an empty array, because no VC was found")
@@ -167,7 +185,24 @@ class DefaultCredentialServiceClientTest {
         var res = client.requestPresentation(CS_URL, "foo", List.of());
         assertThat(res.succeeded()).isTrue();
         assertThat(res.getContent()).isNotNull().doesNotContainNull().isEmpty();
-        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith("/presentation/query")));
+        verify(httpClientMock).execute(argThat(rq -> rq.url().toString().endsWith(PRESENTATION_QUERY)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean containsScope(Request request, List<String> scopes) {
+
+        try (var buffer = new Buffer()) {
+            Objects.requireNonNull(request.body()).writeTo(buffer);
+            var body = mapper.readValue(buffer.inputStream(), new TypeReference<Map<String, Object>>() {
+
+            });
+            var requestScopes = (Collection<String>) body.get("scope");
+
+            return requestScopes.containsAll(scopes);
+
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private VerifiablePresentation createPresentation() {

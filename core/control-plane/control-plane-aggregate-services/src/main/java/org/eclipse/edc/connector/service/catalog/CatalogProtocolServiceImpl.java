@@ -22,8 +22,6 @@ import org.eclipse.edc.catalog.spi.DatasetResolver;
 import org.eclipse.edc.connector.spi.catalog.CatalogProtocolService;
 import org.eclipse.edc.connector.spi.protocol.ProtocolTokenValidator;
 import org.eclipse.edc.policy.engine.spi.PolicyScope;
-import org.eclipse.edc.policy.model.Policy;
-import org.eclipse.edc.spi.agent.ParticipantAgent;
 import org.eclipse.edc.spi.iam.TokenRepresentation;
 import org.eclipse.edc.spi.result.ServiceResult;
 import org.eclipse.edc.transaction.spi.TransactionContext;
@@ -37,7 +35,8 @@ public class CatalogProtocolServiceImpl implements CatalogProtocolService {
     @PolicyScope
     public static final String CATALOGING_REQUEST_SCOPE = "request.catalog";
 
-    private static final String PARTICIPANT_ID_PROPERTY_KEY = "participantId";
+    @Deprecated(since = "0.5.1")
+    private static final String EDC_PROPERTY_PARTICIPANT_ID = EDC_NAMESPACE + "participantId";
 
     private final DatasetResolver datasetResolver;
     private final DataServiceRegistry dataServiceRegistry;
@@ -61,7 +60,7 @@ public class CatalogProtocolServiceImpl implements CatalogProtocolService {
     @Override
     @NotNull
     public ServiceResult<Catalog> getCatalog(CatalogRequestMessage message, TokenRepresentation tokenRepresentation) {
-        return transactionContext.execute(() -> verifyToken(tokenRepresentation)
+        return transactionContext.execute(() -> protocolTokenValidator.verify(tokenRepresentation, CATALOGING_REQUEST_SCOPE)
                 .map(agent -> {
                     try (var datasets = datasetResolver.query(agent, message.getQuerySpec())) {
                         var dataServices = dataServiceRegistry.getDataServices();
@@ -69,7 +68,8 @@ public class CatalogProtocolServiceImpl implements CatalogProtocolService {
                         return Catalog.Builder.newInstance()
                                 .dataServices(dataServices)
                                 .datasets(datasets.toList())
-                                .property(EDC_NAMESPACE + PARTICIPANT_ID_PROPERTY_KEY, participantId)
+                                .participantId(participantId)
+                                .property(EDC_PROPERTY_PARTICIPANT_ID, participantId)
                                 .build();
                     }
                 })
@@ -78,7 +78,7 @@ public class CatalogProtocolServiceImpl implements CatalogProtocolService {
 
     @Override
     public @NotNull ServiceResult<Dataset> getDataset(String datasetId, TokenRepresentation tokenRepresentation) {
-        return transactionContext.execute(() -> verifyToken(tokenRepresentation)
+        return transactionContext.execute(() -> protocolTokenValidator.verify(tokenRepresentation, CATALOGING_REQUEST_SCOPE)
                 .map(agent -> datasetResolver.getById(agent, datasetId))
                 .compose(dataset -> {
                     if (dataset == null) {
@@ -89,8 +89,5 @@ public class CatalogProtocolServiceImpl implements CatalogProtocolService {
                 }));
     }
 
-    private ServiceResult<ParticipantAgent> verifyToken(TokenRepresentation tokenRepresentation) {
-        return protocolTokenValidator.verify(tokenRepresentation, CATALOGING_REQUEST_SCOPE, Policy.Builder.newInstance().build());
-    }
 }
 
